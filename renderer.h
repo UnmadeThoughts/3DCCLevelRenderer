@@ -1,13 +1,17 @@
-// TODO: Part 1b
-//#include "C:\Users\KGNSL\Desktop\3dcc-course-materials-UnmadeThoughts-main\3dcc-course-materials-UnmadeThoughts-main\Assignment 2\Assets\FSLogo.h"
-//#include "C:\Users\KGNSL\Desktop\Assignment 2\OpenGL\Assets\FSLogo.h"
-#include "h2bParser.h"
-
+//External Library Includes
 #include <chrono>
+//Gateware Include
 #include "../Gateware/Gateware/Gateware.h"
+//Parser Includes
+#include "h2bParser.h"
 #include "load_object_oriented.h"
-//#include "C:\Users\KGNSL\Desktop\Assignment 2\Gateware\Gateware\Gateware.h"
-//#include "..\OpenGL\load_object_oriented.h"
+//IMGUI includes
+#include "Libraries/IMGUI/imgui.h"
+#include "Libraries/IMGUI/imgui_impl_win32.h"
+#include "Libraries/IMGUI/imgui_impl_opengl3.h"
+
+//Forward declare message handler from imgui_impl_win32.cpp
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 void PrintLabeledDebugString(const char* label, const char* toPrint)
 {
@@ -62,6 +66,8 @@ class Renderer
 
 	//Level Info
 	unsigned int level = 0;
+	bool show_demo_window = true;
+
 
 	//Proxy Handles
 	GW::SYSTEM::GWindow win;
@@ -85,12 +91,11 @@ class Renderer
 	{
 		GW::MATH::GVECTORF sunDirection, sunColor; //Lighting info
 		GW::MATH::GMATRIXF viewMatrix, projectionMatrix; //Viewing info
-		GW::MATH::GMATRIXF minimapViewMatrix, minimapProjectionMatrix; //Minimap Viewing info
-		GW::MATH::GVECTORF minimapCameraPos; //Minimap Camera POS
 		GW::MATH::GVECTORF cameraPos; //Position for camera
 		GW::MATH::GVECTORF sunAmbient; //Ambient Component for our Lighting
 	};
 	SCENE_DATA shaderMats;
+	SCENE_DATA minimapMats;
 	GLint locShaderMats;
 
 	//Controller Inputs
@@ -99,6 +104,30 @@ class Renderer
 
 	Level_Objects models;
 
+	//Dear IMGUI Information
+	//Courtesy of IMGUI examples in API_SAMPLES
+	static LONG_PTR	gatewareWndProc;
+	static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+	{
+		LRESULT lr = ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam);
+
+		return CallWindowProcW((WNDPROC)gatewareWndProc, hWnd, msg, wParam, lParam);
+	}
+
+	void DisplayImguiMenu()
+	{
+		ImGui_ImplOpenGL3_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+		ImGui::NewFrame();
+
+		if (show_demo_window)
+			ImGui::ShowDemoWindow(&show_demo_window);
+
+		//Rendering
+		ImGui::Render();
+		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+		ImGui::EndFrame();
+	}
 	
 public:
 	Renderer(GW::SYSTEM::GWindow _win, GW::GRAPHICS::GOpenGLSurface _ogl, GW::SYSTEM::GLog _log)
@@ -107,6 +136,13 @@ public:
 		win = _win;
 		ogl = _ogl;
 		log = _log;
+
+		//Create Universal Window Handler
+		GW::SYSTEM::UNIVERSAL_WINDOW_HANDLE uwh;
+		if (+win.GetWindowHandle(uwh))
+		{
+			gatewareWndProc = SetWindowLongPtr((HWND)uwh.window, GWLP_WNDPROC, (LONG_PTR)WndProc);
+		}
 
 		//Create inputs
 		input.Create(win);
@@ -131,18 +167,23 @@ public:
 		GW::MATH::GVECTORF up = { 0, 1.0f, 0 };					//WORLD UP
 		mat_proxy.LookAtRHF(shaderMats.cameraPos, at, up, shaderMats.viewMatrix); //Create a view matrix using the provided math function using the values passed in above
 
-		//MiniMap View Matrix (level 1)
-		GW::MATH::GMATRIXF tempMMV = GW::MATH::GIdentityMatrixF; //Create an identity as a base
-		shaderMats.minimapCameraPos = { 0.0f, 0.0f, 40.0f };	//CAMERA POS
-		GW::MATH::GVECTORF at2 = { 0.0f, 0.0f, 0.0f };			//CAMERA LOOK
-		GW::MATH::GVECTORF up2 = { 0, 1.0f, 0 };				//WORLD UP
-		mat_proxy.LookAtRHF(shaderMats.minimapCameraPos, at2, up2, shaderMats.minimapViewMatrix); //Create a view matrix using the provided math function using the values passed in above
-
 		//Projection Matrix (level 1)
 		GW::MATH::GMATRIXF tempMP = GW::MATH::GIdentityMatrixF;
 		ogl.GetAspectRatio(AspectRatio);
 		mat_proxy.ProjectionOpenGLRHF(FOV, AspectRatio, 0.1f, 100.0f, tempMP);
 		shaderMats.projectionMatrix = tempMP;
+
+		//Create a minimap data set with all the same from the shaderMats besides camera and view
+		minimapMats.sunDirection = shaderMats.sunDirection;
+		minimapMats.sunColor = shaderMats.sunColor;
+		minimapMats.projectionMatrix = shaderMats.projectionMatrix;
+		minimapMats.sunAmbient = shaderMats.sunAmbient;
+		//MiniMap View Matrix (level 1)
+		GW::MATH::GMATRIXF tempMMV = GW::MATH::GIdentityMatrixF; //Create an identity as a base
+		minimapMats.cameraPos = { 0.1f, 40.0f, 0.1f };		//CAMERA POS
+		GW::MATH::GVECTORF at2 = { 0.0f, 0.0f, 0.0f };			//CAMERA LOOK
+		GW::MATH::GVECTORF up2 = { 0, 1.0f, 0 };				//WORLD UP
+		mat_proxy.LookAtRHF(minimapMats.cameraPos, at2, up2, minimapMats.viewMatrix); //Create a view matrix using the provided math function using the values passed in above
 
 		//LIGHTING INFORMATION
 
@@ -158,10 +199,22 @@ public:
 
 		//h2b Parser initialization
 		
-		models.LoadLevel("../Assets/Level1/GameLevel.txt", "../Assets/Level1/Models", log); //Load the default level
+		models.LoadLevel("../Assets/Level2/GameLevel.txt", "../Assets/Level2/Models", log); //Load the default level
 		models.UploadLevelToGPU(); //Upload the information to the system
 
 		InitializeGraphics();
+
+		//Dear IMGUI Information 
+		IMGUI_CHECKVERSION();
+		ImGui::CreateContext();
+		ImGuiIO& io = ImGui::GetIO(); (void)io;
+
+		ImGui::StyleColorsDark();
+		bool success = false;
+		success = ImGui_ImplWin32_Init(uwh.window);
+		if (!success) abort();
+		success = ImGui_ImplOpenGL3_Init();
+		if (!success) abort();
 	}
 	
 private:
@@ -285,6 +338,43 @@ public:
 	void Update()
 	{
 		UpdateCamera();
+		UpdateLevel();
+	}
+
+	void UpdateLevel()
+	{
+		//Temporary system while IMGUI system is implemented;
+		float oneState = 0.0f;
+		GW::GReturn result1 = input.GetState(G_KEY_1, oneState);
+		if (G_PASS(result1) && result1 != GW::GReturn::REDUNDANT)
+		{
+			if (oneState > 0)
+			{
+				models.UnloadLevel();
+				models.LoadLevel("../Assets/Level1/GameLevel.txt", "../Assets/Level1/Models", log);
+				models.UploadLevelToGPU();
+			}
+		}
+		float twoState = 0.0f;
+		GW::GReturn result2 = input.GetState(G_KEY_2, twoState);
+		if (G_PASS(result2) && result2 != GW::GReturn::REDUNDANT)
+		{
+			if (twoState > 0)
+			{
+				models.UnloadLevel();
+				models.LoadLevel("../Assets/Level2/GameLevel.txt", "../Assets/Level2/Models", log);
+				models.UploadLevelToGPU();
+			}
+		}
+		float levelChange = 0.0f;
+		GW::GReturn resultL = input.GetState(G_KEY_F1, levelChange);
+		if (G_PASS(resultL) && resultL != GW::GReturn::REDUNDANT)
+		{
+			if (levelChange > 0)
+			{
+				show_demo_window = !show_demo_window;
+			}
+		}
 	}
 
 	void UpdateCamera()
@@ -401,6 +491,9 @@ public:
 	{
 		startProgram(shaderExecutable); //Start the program
 
+		//Main camera
+		glViewport(0, 0, (GLsizei)width, (GLsizei)height);
+
 		locShaderMats = glGetUniformBlockIndex(shaderExecutable, "SceneData"); //Getting the location index of the uniform buffer in the GPU side
 
 		glBindBufferBase(GL_UNIFORM_BUFFER, 1, UBO); //Binding the buffer on the GPU side (in VRAM)
@@ -413,7 +506,29 @@ public:
 
 		models.RenderLevel(shaderExecutable); //Renders the level
 
-		glBindVertexArray(0); // some video cards(cough Intel) need this set back to zero or they won't display
+		//Rudimentary minimap
+		glViewport((GLsizei)width / 2, (GLsizei)height / 2, (GLsizei)width/2, (GLsizei)height /2);
+
+		locShaderMats = glGetUniformBlockIndex(shaderExecutable, "SceneData");
+
+		glBindBufferBase(GL_UNIFORM_BUFFER, 1, UBO);
+
+		glUniformBlockBinding(shaderExecutable, locShaderMats, 1);
+
+		//Temporarily modify the camera to the camera of the minimap
+		GW::MATH::GVECTORF tempPos = shaderMats.cameraPos; //Save the main screens camera
+		GW::MATH::GMATRIXF tempView = shaderMats.viewMatrix; //Save the main screens view matrix
+
+		glBindBuffer(GL_UNIFORM_BUFFER, UBO); //Bind the buffer for editing
+		//glBufferSubData(GL_UNIFORM_BUFFER, (sizeof(GW::MATH::GVECTORF) * 2), (sizeof(GW::MATH::GMATRIXF)), &shaderMats.mmView); //Substitute the mm view in for the normal view
+		//glBufferSubData(GL_UNIFORM_BUFFER, ((sizeof(GW::MATH::GVECTORF) * 2) + (sizeof(GW::MATH::GMATRIXF) * 2)), sizeof(GW::MATH::GVECTORF), &shaderMats.mmCameraPos); //Substitute the mm camera pos for the normal camera pos
+		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(SCENE_DATA), &minimapMats);
+
+		models.RenderLevel(shaderExecutable); //Render the level
+		
+		startProgram(0); // some video cards(cough Intel) need this set back to zero or they won't display
+		
+		DisplayImguiMenu();
 	}
 
 private:
@@ -429,3 +544,5 @@ public:
 		models.UnloadLevel(); //Destroys all instances created by LoadLevel()
 	}
 };
+
+LONG_PTR Renderer::gatewareWndProc = 0;
