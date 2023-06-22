@@ -10,6 +10,15 @@
 #include "Libraries/IMGUI/imgui_impl_win32.h"
 #include "Libraries/IMGUI/imgui_impl_opengl3.h"
 
+//defines to determine which of the five level slots are currently valid
+//0 -> Unreleased/Disabled
+//1 -> Released/Enabled
+#define LEVEL_ONE_RELEASED 1
+#define LEVEL_TWO_RELEASED 1
+#define LEVEL_THREE_RELEASED 0
+#define LEVEL_FOUR_RELEASED 0
+#define LEVEL_FIVE_RELEASED 0
+
 //Forward declare message handler from imgui_impl_win32.cpp
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -65,9 +74,10 @@ class Renderer
 	unsigned int mWidth;
 
 	//Level Info
-	unsigned int level = 0;
-	bool show_demo_window = true;
-
+	unsigned int level = 0; //int to store the value of the level currently being rendered
+	bool show_window = false; //Bool to keep track of whether the IMGUI window should be visible/interactable
+	bool levelChanged = false; //Bool to keep track of if the level needs to be re-rendered
+	float plevelState = 0.0f; //Float buffer for toggling window visibility
 
 	//Proxy Handles
 	GW::SYSTEM::GWindow win;
@@ -120,15 +130,35 @@ class Renderer
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
-		if (show_demo_window)
-			ImGui::ShowDemoWindow(&show_demo_window);
-
+		if (show_window)
+		{
+			static int selected_level = -1;
+			const char* names[] = { "Level 1 (Default)", "Level 2", "Level 3 (Unreleased)", "Level 4 (Unreleased)", "Level 5 (Unreleased)" };
+			static bool toggles[] = { true, false, false, false, false };
+			// Simple selection popup (if you want to show the current selection inside the Button itself,
+			// you may want to build a string using the "###" operator to preserve a constant ID with a variable label)
+			if (ImGui::Button("Select.."))
+				ImGui::OpenPopup("level_select_popup");
+			ImGui::SameLine();
+			ImGui::TextUnformatted(selected_level == -1 ? "<None>" : names[selected_level]);
+			if (ImGui::BeginPopup("level_select_popup"))
+			{
+				ImGui::SeparatorText("Level Select");
+				for (int i = 0; i < IM_ARRAYSIZE(names); i++)
+				if (ImGui::Selectable(names[i]))
+				{
+					selected_level = i;
+					level = i;
+					levelChanged = true;
+				}
+				ImGui::EndPopup();
+			}			
+		}
 		//Rendering
 		ImGui::Render();
 		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 		ImGui::EndFrame();
 	}
-	
 public:
 	Renderer(GW::SYSTEM::GWindow _win, GW::GRAPHICS::GOpenGLSurface _ogl, GW::SYSTEM::GLog _log)
 	{
@@ -337,43 +367,48 @@ public:
 
 	void Update()
 	{
-		UpdateCamera();
+		if (!show_window)
+			UpdateCamera();
 		UpdateLevel();
 	}
 
 	void UpdateLevel()
 	{
-		//Temporary system while IMGUI system is implemented;
-		float oneState = 0.0f;
-		GW::GReturn result1 = input.GetState(G_KEY_1, oneState);
-		if (G_PASS(result1) && result1 != GW::GReturn::REDUNDANT)
-		{
-			if (oneState > 0)
-			{
-				models.UnloadLevel();
-				models.LoadLevel("../Assets/Level1/GameLevel.txt", "../Assets/Level1/Models", log);
-				models.UploadLevelToGPU();
-			}
-		}
-		float twoState = 0.0f;
-		GW::GReturn result2 = input.GetState(G_KEY_2, twoState);
-		if (G_PASS(result2) && result2 != GW::GReturn::REDUNDANT)
-		{
-			if (twoState > 0)
-			{
-				models.UnloadLevel();
-				models.LoadLevel("../Assets/Level2/GameLevel.txt", "../Assets/Level2/Models", log);
-				models.UploadLevelToGPU();
-			}
-		}
 		float levelChange = 0.0f;
 		GW::GReturn resultL = input.GetState(G_KEY_F1, levelChange);
 		if (G_PASS(resultL) && resultL != GW::GReturn::REDUNDANT)
 		{
-			if (levelChange > 0)
+			if (levelChange != plevelState)
 			{
-				show_demo_window = !show_demo_window;
+				if (levelChange > 0)
+				{
+					std::cout << levelChange << " - " << plevelState << "\n";
+					show_window = !show_window;
+				}
+				plevelState = levelChange;
+				std::cout << levelChange << " - " << plevelState << "\n";
 			}
+		}
+		if (levelChanged) //If the level has changed
+		{
+			//Unload the current level
+			models.UnloadLevel();
+			switch (level) //Check which level needs to be loaded, and load the corresponding level
+			{
+			case 0:
+				if(LEVEL_ONE_RELEASED == 1)
+				models.LoadLevel("../Assets/Level1/GameLevel.txt", "../Assets/Level1/Models", log);
+				break;
+			case 1:
+				models.LoadLevel("../Assets/Level2/GameLevel.txt", "../Assets/Level2/Models", log);
+				break;
+			//If a level is selected that doesn't have anything to switch to, load the default level (level 1)
+			default:
+				models.LoadLevel("../Assets/Level1/GameLevel.txt", "../Assets/Level1/Models", log);
+				break;
+			}
+			models.UploadLevelToGPU();
+			levelChanged = false; //Reset the flag
 		}
 	}
 
@@ -516,13 +551,13 @@ public:
 		glUniformBlockBinding(shaderExecutable, locShaderMats, 1);
 
 		//Temporarily modify the camera to the camera of the minimap
-		GW::MATH::GVECTORF tempPos = shaderMats.cameraPos; //Save the main screens camera
-		GW::MATH::GMATRIXF tempView = shaderMats.viewMatrix; //Save the main screens view matrix
+		GW::MATH::GVECTORF tempPos = minimapMats.cameraPos; //Save the main screens camera
+		GW::MATH::GMATRIXF tempView = minimapMats.viewMatrix; //Save the main screens view matrix
 
 		glBindBuffer(GL_UNIFORM_BUFFER, UBO); //Bind the buffer for editing
-		//glBufferSubData(GL_UNIFORM_BUFFER, (sizeof(GW::MATH::GVECTORF) * 2), (sizeof(GW::MATH::GMATRIXF)), &shaderMats.mmView); //Substitute the mm view in for the normal view
-		//glBufferSubData(GL_UNIFORM_BUFFER, ((sizeof(GW::MATH::GVECTORF) * 2) + (sizeof(GW::MATH::GMATRIXF) * 2)), sizeof(GW::MATH::GVECTORF), &shaderMats.mmCameraPos); //Substitute the mm camera pos for the normal camera pos
-		glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(SCENE_DATA), &minimapMats);
+		glBufferSubData(GL_UNIFORM_BUFFER, (sizeof(GW::MATH::GVECTORF) * 2), (sizeof(GW::MATH::GMATRIXF)), (void*) & minimapMats.viewMatrix); //Substitute the mm view in for the normal view
+		glBufferSubData(GL_UNIFORM_BUFFER, ((sizeof(GW::MATH::GVECTORF) * 2) + (sizeof(GW::MATH::GMATRIXF) * 2)), sizeof(GW::MATH::GVECTORF), (void*) & minimapMats.cameraPos); //Substitute the mm camera pos for the normal camera pos
+		//glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(SCENE_DATA), &minimapMats);
 
 		models.RenderLevel(shaderExecutable); //Render the level
 		
