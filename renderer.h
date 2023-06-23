@@ -203,11 +203,6 @@ public:
 		mat_proxy.ProjectionOpenGLRHF(FOV, AspectRatio, 0.1f, 100.0f, tempMP);
 		shaderMats.projectionMatrix = tempMP;
 
-		//Create a minimap data set with all the same from the shaderMats besides camera and view
-		minimapMats.sunDirection = shaderMats.sunDirection;
-		minimapMats.sunColor = shaderMats.sunColor;
-		minimapMats.projectionMatrix = shaderMats.projectionMatrix;
-		minimapMats.sunAmbient = shaderMats.sunAmbient;
 		//MiniMap View Matrix (level 1)
 		GW::MATH::GMATRIXF tempMMV = GW::MATH::GIdentityMatrixF; //Create an identity as a base
 		minimapMats.cameraPos = { 0.1f, 40.0f, 0.1f };		//CAMERA POS
@@ -254,7 +249,7 @@ private:
 #ifndef NDEBUG
 		BindDebugCallback(); // In debug mode we link openGL errors to the console
 #endif
-		CreateUBOBuffer(&shaderMats, sizeof(SCENE_DATA));
+		CreateUBOBuffer(&shaderMats, sizeof(SCENE_DATA), UBO);
 		CompileVertexShader();
 		CompileFragmentShader();
 		CreateExecutableShaderProgram();
@@ -267,23 +262,7 @@ private:
 		glDebugMessageCallback(MessageCallback, 0);
 	}
 #endif
-	void CreateVertexBuffer(const void* data, unsigned int sizeInBytes)
-	{
-		glGenVertexArrays(1, &vertexArray);
-		glGenBuffers(1, &vertexBufferObject);
-		glBindVertexArray(vertexArray);
-		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferObject);
-		glBufferData(GL_ARRAY_BUFFER, sizeInBytes, data, GL_STATIC_DRAW);
-	}
-
-	void CreateIndexBuffer(const void* data, unsigned int sizeInBytes)
-	{
-		glGenBuffers(1, &indexBufferObject);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferObject);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeInBytes, data, GL_STATIC_DRAW);
-	}
-
-	void CreateUBOBuffer(const void* data, unsigned int sizeInBytes)
+	void CreateUBOBuffer(const void* data, unsigned int sizeInBytes, GLuint& UBO)
 	{
 		glGenBuffers(1, &UBO);
 		glBindBuffer(GL_UNIFORM_BUFFER, UBO);
@@ -351,16 +330,6 @@ private:
 			glGetProgramInfoLog(shaderExecutable, 1024, NULL, errors);
 			std::cout << errors << std::endl;
 		}
-	}
-
-	void SetVertexAttributes()
-	{
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)0);
-		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(3 * sizeof(float)));
-		glEnableVertexAttribArray(1);
-		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 9 * sizeof(float), (void*)(6 * sizeof(float)));
-		glEnableVertexAttribArray(2);
 	}
 
 public:

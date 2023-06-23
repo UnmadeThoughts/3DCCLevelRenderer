@@ -10,8 +10,10 @@ class Model {
 	// Loads and stores CPU model data from .h2b file
 	H2B::Parser cpuModel; // reads the .h2b format
 	// Shader variables needed by this model. 
-	GW::MATH::GMATRIXF world;// TODO: Add matrix/light/etc vars..
+	GW::MATH::GMATRIXF world;
+	// TODO: Add matrix/light/etc vars..
 	// TODO: API Rendering vars here (unique to this model)
+	
 	// Vertex Buffer
 	GLuint vertexArray = 0;
 	GLuint vertexBufferObject = 0;
@@ -22,72 +24,80 @@ class Model {
 	// Uniform/ShaderVariable Buffer
 	GLuint UBO = 0;
 
+	//Model Data Struct
 	struct MODEL_DATA {
 		GW::MATH::GMATRIXF worldMatrix; //Final world space transform
 		H2B::ATTRIBUTES material; //Color/texture of surface
+		// TODO: Add matrix/light/etc vars..
+		// TODO: API Rendering vars here (unique to this model)
 	};
+	//Model Object
 	MODEL_DATA model;
 
 public:
+	//Sets the name of the model to modelName
+	//std::string modelName - New name for the model
 	inline void SetName(std::string modelName) {
 		name = modelName;
 	}
+
+	//Sets the world matrix of the model to worldMatrix
+	//GW::MATH::GMATRIXF worldMatrix - New world matrix for the model
 	inline void SetWorldMatrix(GW::MATH::GMATRIXF worldMatrix) {
 		world = worldMatrix;
 	}
+
 	bool LoadModelDataFromDisk(const char* h2bPath) {
 		// if this succeeds "cpuModel" should now contain all the model's info
 		return cpuModel.Parse(h2bPath);
 	}
-	bool UploadModelData2GPU(/*specific API device for loading*/) {
-		// TODO: Use chosen API to upload this model's graphics data to GPU
+
+	bool UploadModelData2GPU() {
 		//EVERYTHING THATS DONE ONCE PER CYCLE
 
 		//Create a Vertex Buffer
-		glGenVertexArrays(1, &vertexArray);
-		glGenBuffers(1, &vertexBufferObject);
-		glBindVertexArray(vertexArray);
-		glBindBuffer(GL_ARRAY_BUFFER, vertexBufferObject);
-		glBufferData(GL_ARRAY_BUFFER, (sizeof(H2B::VERTEX) * cpuModel.vertexCount), cpuModel.vertices.data(), GL_STATIC_DRAW);
+		CreateVertexBuffer(cpuModel.vertices.data(), (sizeof(H2B::VERTEX) * cpuModel.vertexCount), vertexArray, vertexBufferObject);
 
 		//Create an Index Buffer
-		glGenBuffers(1, &indexBufferObject);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferObject);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, (sizeof(unsigned int) * cpuModel.indexCount), cpuModel.indices.data(), GL_STATIC_DRAW);
+		CreateIndexBuffer(cpuModel.indices.data(), (sizeof(unsigned int) * cpuModel.indexCount), indexBufferObject);
 
 		//Create UBO Buffer
-		glGenBuffers(1, &UBO);
-		glBindBuffer(GL_UNIFORM_BUFFER, UBO);
-		glBufferData(GL_UNIFORM_BUFFER, sizeof(MODEL_DATA), &model, GL_DYNAMIC_DRAW);
+		CreateUBO(&model, sizeof(MODEL_DATA), UBO);
 
 		//Establish Vertex Attribute Information
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(H2B::VERTEX), (void*)offsetof(H2B::VERTEX, pos));
-		glEnableVertexAttribArray(0);
-		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(H2B::VERTEX), (void*)offsetof(H2B::VERTEX, uvw));
-		glEnableVertexAttribArray(1);
-		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(H2B::VERTEX), (void*)offsetof(H2B::VERTEX, nrm));
-		glEnableVertexAttribArray(2);
+		SetVertexAttributes();
 
 		return true;
 	}
+
+	//Draws a specified Model
+	//GLuint shaderExectuable - The location of the shaderExecutable that will draw the model
 	bool DrawModel(GLuint shaderExecutable) {
-		// TODO: Use chosen API to setup the pipeline for this model and draw it
 		//EVERYTHING DONE ONCE PER LOOP
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferObject);
-		glBindVertexArray(vertexArray);
 		
-		locShaderMats = glGetUniformBlockIndex(shaderExecutable, "ModelData"); //Getting the location index of the uniform buffer in the GPU side
+		//Bind the vertex array object before the draw so the data's can be drawn
+		glBindVertexArray(vertexArray); 
+		//Bind the index buffer before the draw so the data's location can be drawn
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBufferObject); 
 
-		glBindBufferBase(GL_UNIFORM_BUFFER, 2, UBO); //Binding the buffer on the GPU side (in VRAM)
+		//Get the location index of the uniform buffer in the GPU side
+		locShaderMats = glGetUniformBlockIndex(shaderExecutable, "ModelData"); 
 
-		glUniformBlockBinding(shaderExecutable, locShaderMats, 2); //Binding the block TO the buffer in VRAM
-		glBindBuffer(GL_UNIFORM_BUFFER, UBO);
+		//Bind the buffer on the GPU side (in VRAM) to the MODEL_DATA UBO (which is set to a static location of 2)
+		glBindBufferBase(GL_UNIFORM_BUFFER, 2, UBO); 
+
+		//Binding the block TO the buffer in VRAM for the MODEL_DATA UBO (which is set to a static location of 2)
+		glUniformBlockBinding(shaderExecutable, locShaderMats, 2); 
+		//Bind the UBO before the draw so the data's location can be drawn
+		glBindBuffer(GL_UNIFORM_BUFFER, UBO); 
 
 		for (int i = 0; i < cpuModel.meshCount; i++)
 		{
-			model.worldMatrix = world;
-			
-			model.material = cpuModel.materials[i].attrib; //We're allowed to recast because the memory layout is indentical :O
+			//Set the model's world matrix to the world matrix from the parse
+			model.worldMatrix = world; 
+
+			//Copy the parsed model material onto the model
+			model.material = cpuModel.materials[i].attrib; 
 
 			//Call SubBuffer and rewrite the entire UBO
 			glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(MODEL_DATA), &model);
@@ -95,17 +105,72 @@ public:
 			//Draw
 			glDrawElements(GL_TRIANGLES, cpuModel.meshes[i].drawInfo.indexCount, GL_UNSIGNED_INT, (void*)(cpuModel.meshes[i].drawInfo.indexOffset * sizeof(float)));
 		}
-		glBindVertexArray(0); // some video cards(cough Intel) need this set back to zero or they won't display
+		//Return the GPU vertex array bind to 0, so Intel can display properly
+		glBindVertexArray(0);
 		return true;
 	}
-	bool FreeResources(/*specific API device for unloading*/) {
-		// TODO: Use chosen API to free all GPU resources used by this model
+
+	//Frees all resources created on the GPU side (internal destructor)
+	//Destructs the vertex array object, vertex buffer object, index buffer object, and UBO created from the constructor
+	bool FreeResources() {
 		//DESTRUCTOR INFORMATION
-		// free resources
 		glDeleteVertexArrays(1, &vertexArray);
 		glDeleteBuffers(1, &vertexBufferObject);
 		glDeleteBuffers(1, &indexBufferObject);
 		glDeleteBuffers(1, &UBO);
+	}
+
+	//Helper Methods For UploadModelData2GPU
+
+	//Creates a Vertex Buffer
+	//const void* data - The data to create a buffer for
+	//unsigned int sizeInBytes - The size of the parameter data in bytes
+	//GLuint& locVertexArray - The location of the vertex array
+	//GLuint& locVertexBufferObject - The location of the vertex buffer object
+	void CreateVertexBuffer(const void* data, unsigned int sizeInBytes, GLuint& locVertexArray, GLuint& locVertexBufferObject)
+	{
+		glGenVertexArrays(1, &locVertexArray);
+		glGenBuffers(1, &locVertexBufferObject);
+		glBindVertexArray(locVertexArray);
+		glBindBuffer(GL_ARRAY_BUFFER, locVertexBufferObject);
+		glBufferData(GL_ARRAY_BUFFER, sizeInBytes, data, GL_STATIC_DRAW);
+	}
+
+	//Creates a Index Buffer
+	//const void* data - The data to create a buffer for
+	//unsigned int sizeInBytes - The size of the parameter data in bytes
+	//GLuint& locIndexBufferObject - The location of the index buffer object
+	void CreateIndexBuffer(const void* data, unsigned int sizeInBytes, GLuint& locIndexBufferObject)
+	{
+		glGenBuffers(1, &locIndexBufferObject);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, locIndexBufferObject);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeInBytes, data, GL_STATIC_DRAW);
+	}
+
+	//Creates a Uniform Buffer Object
+	//const void* data - The data to create a buffer for
+	//unsigned int sizeInBytes - The size of the parameter data in bytes
+	//GLuint& locUBO - The location of the uniform buffer object (UBO)
+	void CreateUBO(const void* data, unsigned int sizeInBytes, GLuint& locUBO)
+	{
+		glGenBuffers(1, &locUBO);
+		glBindBuffer(GL_UNIFORM_BUFFER, locUBO);
+		glBufferData(GL_UNIFORM_BUFFER, sizeInBytes, data, GL_DYNAMIC_DRAW);
+	}
+
+	//Sets Vertex Attributes
+	//3 Vertex Attributes are bound by this function, for the Vertex's pos, uvw, and nrm variables
+	//VECTOR pos - The vertex's position
+	//VECTOR uvw - The vertex's uvw information
+	//VECTOR nrm - The vertex's normals
+	void SetVertexAttributes()
+	{
+		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(H2B::VERTEX), (void*)offsetof(H2B::VERTEX, pos));
+		glEnableVertexAttribArray(0);
+		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(H2B::VERTEX), (void*)offsetof(H2B::VERTEX, uvw));
+		glEnableVertexAttribArray(1);
+		glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(H2B::VERTEX), (void*)offsetof(H2B::VERTEX, nrm));
+		glEnableVertexAttribArray(2);
 	}
 };
 
@@ -200,13 +265,15 @@ public:
 		log.LogCategorized("EVENT", "GAME LEVEL WAS LOADED TO CPU [OBJECT ORIENTED]");
 		return true;
 	}
+
 	// Upload the CPU level to GPU
-	void UploadLevelToGPU(/*pass handle to API device if needed*/) {
+	void UploadLevelToGPU() {
 		// iterate over each model and tell it to draw itself
 		for (auto& e : allObjectsInLevel) {
 			e.UploadModelData2GPU(/*forward handle to API device if needed*/);
 		}
 	}
+
 	// Draws all objects in the level
 	void RenderLevel(GLuint shaderExecutable) {
 		// iterate over each model and tell it to draw itself
@@ -214,10 +281,12 @@ public:
 			e.DrawModel(shaderExecutable);
 		}
 	}
+
 	// used to wipe CPU & GPU level data between levels
 	void UnloadLevel() {
 		allObjectsInLevel.clear();
 	}
+
 	// *THIS APPROACH COMBINES DATA & LOGIC* 
 	// *WITH THIS APPROACH THE CURRENT RENDERER SHOULD BE JUST AN API MANAGER CLASS*
 	// *ALL ACTUAL GPU LOADING AND RENDERING SHOULD BE HANDLED BY THE MODEL CLASS* 
